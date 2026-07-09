@@ -65,9 +65,18 @@ class Policy(BasePolicy):
             self._rng = rng or jax.random.key(0)
 
     @override
-    def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+    def infer(
+        self,
+        obs: dict,
+        *,
+        noise: np.ndarray | None = None,
+        action_prefix: np.ndarray | None = None,
+        delay: np.ndarray | None = None,
+    ) -> dict:  # type: ignore[misc]
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
+        if action_prefix is not None:
+            inputs["actions"] = action_prefix
         inputs = self._input_transform(inputs)
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
@@ -86,6 +95,13 @@ class Policy(BasePolicy):
             if noise.ndim == 2:  # If noise is (action_horizon, action_dim), add batch dimension
                 noise = noise[None, ...]  # Make it (1, action_horizon, action_dim)
             sample_kwargs["noise"] = noise
+
+        if action_prefix is not None and delay is not None:
+            sample_kwargs["action_prefix"] = inputs["actions"]
+            delay = jnp.asarray(delay)
+            if delay.ndim == 0:
+                delay = delay[None]
+            sample_kwargs["delay"] = delay
 
         observation = _model.Observation.from_dict(inputs)
         start_time = time.monotonic()

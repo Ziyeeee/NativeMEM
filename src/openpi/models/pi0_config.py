@@ -13,6 +13,7 @@ import openpi.shared.nnx_utils as nnx_utils
 
 if TYPE_CHECKING:
     from openpi.models.pi0 import Pi0
+    from openpi.models.pi0_rtc import Pi0RTC
 
 
 @dataclasses.dataclass(frozen=True)
@@ -26,11 +27,15 @@ class Pi0Config(_model.BaseModelConfig):
     action_horizon: int = 50
     max_token_len: int = None  # type: ignore
     # Pi05 has two differences from Pi0:
-    # - the state input is part of the discrete language tokens rather than a continuous input that is part of the suffix
+    # - the state input is part of the discrete language tokens rather than a continuous suffix input
     # - the action expert uses adaRMSNorm to inject the flow matching timestep
     pi05: bool = False
     # This config option is not used directly by the model, but it is read by the ModelTransformFactory.
     discrete_state_input: bool = None  # type: ignore
+
+    # RTC (Real-Time Chunking) configuration. When True, create() returns Pi0RTC.
+    rtc: bool = False
+    max_delay: int = 8
 
     pytorch_compile_mode: str | None = "max-autotune"
 
@@ -55,7 +60,11 @@ class Pi0Config(_model.BaseModelConfig):
         return _model.ModelType.PI0
 
     @override
-    def create(self, rng: at.KeyArrayLike) -> "Pi0":
+    def create(self, rng: at.KeyArrayLike) -> "Pi0 | Pi0RTC":
+        if self.rtc:
+            from openpi.models.pi0_rtc import Pi0RTC
+
+            return Pi0RTC(self, rngs=nnx.Rngs(rng))
         from openpi.models.pi0 import Pi0
 
         return Pi0(self, rngs=nnx.Rngs(rng))

@@ -48,6 +48,37 @@ class PaligemmaTokenizer:
         return np.asarray(tokens), np.asarray(mask)
 
 
+class MemoryTokenizer:
+    """Pad or truncate NativeMEM memory tokens."""
+
+    def __init__(self, max_len: int = 256):
+        self._max_len = max_len
+
+    def tokenize(self, memory: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        tokens = np.asarray(memory, dtype=np.float32)
+        if tokens.ndim == 3:
+            t, v, d = tokens.shape
+            tokens = tokens.reshape(t * v, d)
+        elif tokens.ndim != 2:
+            raise ValueError(f"MemoryTokenizer expects [T, V, D] or [N, D]; got shape {tokens.shape}")
+
+        tokens_len = len(tokens)
+        if tokens_len < self._max_len:
+            pad = np.zeros((self._max_len - tokens_len, tokens.shape[-1]), dtype=tokens.dtype)
+            tokens = np.concatenate([tokens, pad], axis=0)
+            mask = [True] * tokens_len + [False] * (self._max_len - tokens_len)
+        else:
+            if tokens_len > self._max_len:
+                logging.warning(
+                    f"Memory length ({tokens_len}) exceeds max length ({self._max_len}), truncating. "
+                    "Consider increasing memory_tokenizer_max_len if this happens frequently."
+                )
+            tokens = tokens[-self._max_len :]
+            mask = [True] * self._max_len
+
+        return np.asarray(tokens), np.asarray(mask)
+
+
 class FASTTokenizer:
     def __init__(self, max_len: int = 256, fast_tokenizer_path: str = "physical-intelligence/fast"):
         self._max_len = max_len

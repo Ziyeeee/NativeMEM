@@ -267,6 +267,18 @@ class TokenizePrompt(DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
+class TokenizeMemory(DataTransformFn):
+    tokenizer: _tokenizer.MemoryTokenizer
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if (memory := data.pop("memory", None)) is None:
+            raise ValueError("Memory is required")
+
+        tokens, token_masks = self.tokenizer.tokenize(memory)
+        return {**data, "memory": tokens, "memory_mask": token_masks}
+
+
+@dataclasses.dataclass(frozen=True)
 class TokenizeFASTInputs(DataTransformFn):
     tokenizer: _tokenizer.FASTTokenizer
 

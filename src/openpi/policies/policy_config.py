@@ -6,6 +6,7 @@ from typing import Any
 import jax.numpy as jnp
 
 import openpi.models.model as _model
+import openpi.models.nativemem_config as nativemem_config
 import openpi.policies.policy as _policy
 import openpi.shared.download as download
 from openpi.training import checkpoints as _checkpoints
@@ -54,7 +55,18 @@ def create_trained_policy(
         model = train_config.model.load_pytorch(train_config, weight_path)
         model.paligemma_with_expert.to_bfloat16_for_selected_params("bfloat16")
     else:
-        model = train_config.model.load(_model.restore_params(checkpoint_dir / "params", dtype=jnp.bfloat16))
+        if isinstance(train_config.model, nativemem_config.NativeMEMConfig):
+            try:
+                params_path = checkpoint_dir / "ema_params"
+                model = train_config.model.load(_model.restore_params(params_path, dtype=jnp.bfloat16))
+            except FileNotFoundError:
+                params_path = checkpoint_dir / "params"
+                model = train_config.model.load(_model.restore_params(params_path, dtype=jnp.bfloat16))
+        else:
+            params_path = checkpoint_dir / "params"
+            model = train_config.model.load(_model.restore_params(params_path, dtype=jnp.bfloat16))
+
+        logging.info("Loaded params from %s", params_path)
     data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
     if norm_stats is None:
         # We are loading the norm stats from the checkpoint instead of the config assets dir to make sure

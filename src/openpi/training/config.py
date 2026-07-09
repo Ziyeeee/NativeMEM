@@ -236,6 +236,7 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
     # the space used by the pi internal runtime which was used to train the base model. People who
     # use standard Aloha data should set this to true.
     adapt_to_pi: bool = True
+    gripper_type: Literal["trossen", "sim", "arx"] = "trossen"
 
     # Repack transforms.
     repack_transforms: tyro.conf.Suppress[_transforms.Group] = dataclasses.field(
@@ -257,8 +258,8 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         data_transforms = _transforms.Group(
-            inputs=[aloha_policy.AlohaInputs(adapt_to_pi=self.adapt_to_pi)],
-            outputs=[aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi)],
+            inputs=[aloha_policy.AlohaInputs(adapt_to_pi=self.adapt_to_pi, gripper_type=self.gripper_type)],
+            outputs=[aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi, gripper_type=self.gripper_type)],
         )
         if self.use_delta_joint_actions:
             delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
@@ -575,6 +576,18 @@ _CONFIGS = [
         data=LeRobotAlohaDataConfig(
             assets=AssetsConfig(asset_id="trossen"),
         ),
+        policy_metadata={"reset_pose": [0, -1.5, 1.5, 0, 0, 0]},
+    ),
+    TrainConfig(
+        name="pi05_rtc",
+        model=pi0_config.Pi0Config(pi05=True, rtc=True),
+        data=LeRobotAlohaDataConfig(
+            assets=AssetsConfig(
+                assets_dir="gs://openpi-assets/checkpoints/pi05_base/assets",
+                asset_id="trossen",
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         policy_metadata={"reset_pose": [0, -1.5, 1.5, 0, 0, 0]},
     ),
     TrainConfig(

@@ -13,6 +13,25 @@ import openpi.shared.download as download
 logger = logging.getLogger(__name__)
 
 
+def _stringify_keys(tree):
+    """Recursively convert dict keys to strings for Orbax/NNX compatibility."""
+    if isinstance(tree, dict):
+        return {str(k): _stringify_keys(v) for k, v in tree.items()}
+    return tree
+
+
+def _restore_keys(ref, merged):
+    """Restore integer dict keys where the reference tree used them."""
+    if not isinstance(ref, dict) or not isinstance(merged, dict):
+        return merged
+    ref_key_map = {str(k): k for k in ref}
+    result = {}
+    for key, value in merged.items():
+        orig_key = ref_key_map.get(key, key)
+        result[orig_key] = _restore_keys(ref.get(orig_key, {}), value)
+    return result
+
+
 @runtime_checkable
 class WeightLoader(Protocol):
     def load(self, params: at.Params) -> at.Params:
@@ -71,6 +90,51 @@ class PaliGemmaWeightLoader(WeightLoader):
         loaded_params = {"PaliGemma": flax.traverse_util.unflatten_dict(flat_params, sep="/")["params"]}
         # Add all missing weights.
         return _merge_params(loaded_params, params, missing_regex=".*")
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeMEMWeightLoader(WeightLoader):
+    """Loads base pi0.5 weights while keeping NativeMEM-only parameters initialized."""
+
+    params_path: str
+
+    def load(self, params: at.Params) -> at.Params:
+        loaded_params = _model.restore_params(download.maybe_download(self.params_path), restore_type=np.ndarray)
+        str_params = _stringify_keys(params)
+        merged_params = _merge_params(loaded_params, str_params, missing_regex=".*")
+        return _restore_keys(params, merged_params)
+
+
+def _remap_siglip_encoder_key(key: str, dest_prefix: str) -> str:
+    suffix = key[len("PaliGemma/img/") :]
+    return f"{dest_prefix}/{suffix}"
+
+
+@dataclasses.dataclass(frozen=True)
+class MemTokenizerWeightLoader(WeightLoader):
+    """Loads pi0.5 weights into the mem_tokenizer student and frozen VLM."""
+
+    params_path: str
+
+    def load(self, params: at.Params) -> at.Params:
+        loaded_params = _model.restore_params(download.maybe_download(self.params_path), restore_type=np.ndarray)
+        flat_loaded = flax.traverse_util.flatten_dict(loaded_params, sep="/")
+
+        suffix_mlp_prefixes = ("action_in_proj/", "time_mlp_in/", "time_mlp_out/", "action_out_proj/")
+        remapped = {}
+        for key, value in flat_loaded.items():
+            if key.startswith("PaliGemma/img/"):
+                remapped[_remap_siglip_encoder_key(key, "encoder")] = value
+                remapped[key] = value
+            elif key.startswith("PaliGemma/llm/"):
+                remapped[key] = value
+            elif key.startswith(suffix_mlp_prefixes):
+                remapped[key] = value
+
+        remapped_params = flax.traverse_util.unflatten_dict(remapped, sep="/")
+        str_params = _stringify_keys(params)
+        merged_params = _merge_params(remapped_params, str_params, missing_regex=".*")
+        return _restore_keys(params, merged_params)
 
 
 def _merge_params(loaded_params: at.Params, params: at.Params, *, missing_regex: str) -> at.Params:

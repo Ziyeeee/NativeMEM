@@ -106,9 +106,18 @@ class Observation(Generic[ArrayT]):
     # Token loss mask (for FAST autoregressive model).
     token_loss_mask: at.Bool[ArrayT, "*b l"] | None = None
 
+    # NativeMEM memory tokens.
+    memory: at.Float[ArrayT, "*b t d"] | None = None
+    memory_mask: at.Bool[ArrayT, "*b t"] | None = None
+
+    # mem_tokenizer training-only temporal image sequence.
+    image_seq: dict[str, at.Float[ArrayT, "*b t h w c"]] | None = None
+    image_seq_masks: dict[str, at.Bool[ArrayT, "*b t"]] | None = None
+    history_positions: at.Int[ArrayT, "*b hl"] | None = None
+
     @classmethod
     def from_dict(cls, data: at.PyTree[ArrayT]) -> "Observation[ArrayT]":
-        """This method defines the mapping between unstructured data (i.e., nested dict) to the structured Observation format."""
+        """Map an unstructured nested dict to the structured Observation format."""
         # Ensure that tokenized_prompt and tokenized_prompt_mask are provided together.
         if ("tokenized_prompt" in data) != ("tokenized_prompt_mask" in data):
             raise ValueError("tokenized_prompt and tokenized_prompt_mask must be provided together.")
@@ -126,6 +135,11 @@ class Observation(Generic[ArrayT]):
             tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
             token_ar_mask=data.get("token_ar_mask"),
             token_loss_mask=data.get("token_loss_mask"),
+            memory=data.get("memory"),
+            memory_mask=data.get("memory_mask"),
+            image_seq=data.get("image_seq"),
+            image_seq_masks=data.get("image_seq_mask", data.get("image_seq_masks")),
+            history_positions=data.get("history_positions"),
         )
 
     def to_dict(self) -> at.PyTree[ArrayT]:
@@ -133,6 +147,8 @@ class Observation(Generic[ArrayT]):
         result = dataclasses.asdict(self)
         result["image"] = result.pop("images")
         result["image_mask"] = result.pop("image_masks")
+        if "image_seq_masks" in result:
+            result["image_seq_mask"] = result.pop("image_seq_masks")
         return result
 
 
@@ -205,7 +221,19 @@ def preprocess_observation(
         tokenized_prompt_mask=observation.tokenized_prompt_mask,
         token_ar_mask=observation.token_ar_mask,
         token_loss_mask=observation.token_loss_mask,
+        memory=observation.memory,
+        memory_mask=observation.memory_mask,
+        image_seq=observation.image_seq,
+        image_seq_masks=observation.image_seq_masks,
+        history_positions=observation.history_positions,
     )
+
+
+def _intify_pytree_keys(tree):
+    """Recursively convert purely numeric string dict keys to ints."""
+    if isinstance(tree, dict):
+        return {(int(k) if isinstance(k, str) and k.isdigit() else k): _intify_pytree_keys(v) for k, v in tree.items()}
+    return tree
 
 
 @dataclasses.dataclass(frozen=True)
@@ -236,6 +264,7 @@ class BaseModelConfig(abc.ABC):
         graphdef, state = nnx.split(model)
         if remove_extra_params:
             params = ocp.transform_utils.intersect_trees(state.to_pure_dict(), params)
+        params = _intify_pytree_keys(params)
         at.check_pytree_equality(expected=state.to_pure_dict(), got=params, check_shapes=True, check_dtypes=False)
         state.replace_by_pure_dict(params)
         return nnx.merge(graphdef, state)

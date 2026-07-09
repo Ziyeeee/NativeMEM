@@ -1,10 +1,12 @@
 import dataclasses
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import einops
 import numpy as np
 
 from openpi import transforms
+
+GripperType = Literal["trossen", "sim", "arx"]
 
 
 def make_aloha_example() -> dict:
@@ -35,12 +37,18 @@ class AlohaInputs(transforms.DataTransformFn):
     # the space used by the pi internal runtime which was used to train the base model.
     adapt_to_pi: bool = True
 
+    # Selects the gripper-space conversion. Only used when adapt_to_pi=True.
+    #   "trossen": original Aloha pipeline (state in linear position, action in joint angle).
+    #   "sim": state and action both in [0, 1] (0=close, 1=open).
+    #   "arx": state and action both in [-pi, 0] (0=close, -pi=open).
+    gripper_type: GripperType = "trossen"
+
     # The expected cameras names. All input cameras must be in this set. Missing cameras will be
     # replaced with black images and the corresponding `image_mask` will be set to False.
     EXPECTED_CAMERAS: ClassVar[tuple[str, ...]] = ("cam_high", "cam_low", "cam_left_wrist", "cam_right_wrist")
 
     def __call__(self, data: dict) -> dict:
-        data = _decode_aloha(data, adapt_to_pi=self.adapt_to_pi)
+        data = _decode_aloha(data, adapt_to_pi=self.adapt_to_pi, gripper_type=self.gripper_type)
 
         in_images = data["images"]
         if set(in_images) - set(self.EXPECTED_CAMERAS):
@@ -78,11 +86,14 @@ class AlohaInputs(transforms.DataTransformFn):
         # Actions are only available during training.
         if "actions" in data:
             actions = np.asarray(data["actions"])
-            actions = _encode_actions_inv(actions, adapt_to_pi=self.adapt_to_pi)
+            actions = _encode_actions_inv(actions, adapt_to_pi=self.adapt_to_pi, gripper_type=self.gripper_type)
             inputs["actions"] = actions
 
         if "prompt" in data:
             inputs["prompt"] = data["prompt"]
+
+        if "memory" in data:
+            inputs["memory"] = data["memory"]
 
         return inputs
 
@@ -95,10 +106,13 @@ class AlohaOutputs(transforms.DataTransformFn):
     # the space used by the pi internal runtime which was used to train the base model.
     adapt_to_pi: bool = True
 
+    # Must match the gripper_type used for AlohaInputs so outputs round-trip to the original action space.
+    gripper_type: GripperType = "trossen"
+
     def __call__(self, data: dict) -> dict:
         # Only return the first 14 dims.
         actions = np.asarray(data["actions"][:, :14])
-        return {"actions": _encode_actions(actions, adapt_to_pi=self.adapt_to_pi)}
+        return {"actions": _encode_actions(actions, adapt_to_pi=self.adapt_to_pi, gripper_type=self.gripper_type)}
 
 
 def _joint_flip_mask() -> np.ndarray:
@@ -156,11 +170,11 @@ def _gripper_from_angular_inv(value):
     return value - 0.5476
 
 
-def _decode_aloha(data: dict, *, adapt_to_pi: bool = False) -> dict:
+def _decode_aloha(data: dict, *, adapt_to_pi: bool = False, gripper_type: GripperType = "trossen") -> dict:
     # state is [left_arm_joint_angles, left_arm_gripper, right_arm_joint_angles, right_arm_gripper]
     # dim sizes: [6, 1, 6, 1]
     state = np.asarray(data["state"])
-    state = _decode_state(state, adapt_to_pi=adapt_to_pi)
+    state = _decode_state(state, adapt_to_pi=adapt_to_pi, gripper_type=gripper_type)
 
     def convert_image(img):
         img = np.asarray(img)
@@ -178,25 +192,62 @@ def _decode_aloha(data: dict, *, adapt_to_pi: bool = False) -> dict:
     return data
 
 
-def _decode_state(state: np.ndarray, *, adapt_to_pi: bool = False) -> np.ndarray:
+def _decode_state(state: np.ndarray, *, adapt_to_pi: bool = False, gripper_type: GripperType = "trossen") -> np.ndarray:
     if adapt_to_pi:
         # Flip the joints.
         state = _joint_flip_mask() * state
         # Reverse the gripper transformation that is being applied by the Aloha runtime.
-        state[[6, 13]] = _gripper_to_angular(state[[6, 13]])
+        state[[6, 13]] = _gripper_state_to_pi(state[[6, 13]], gripper_type)
     return state
 
 
-def _encode_actions(actions: np.ndarray, *, adapt_to_pi: bool = False) -> np.ndarray:
+def _encode_actions(
+    actions: np.ndarray, *, adapt_to_pi: bool = False, gripper_type: GripperType = "trossen"
+) -> np.ndarray:
     if adapt_to_pi:
         # Flip the joints.
         actions = _joint_flip_mask() * actions
-        actions[:, [6, 13]] = _gripper_from_angular(actions[:, [6, 13]])
+        actions[:, [6, 13]] = _gripper_action_from_pi(actions[:, [6, 13]], gripper_type)
     return actions
 
 
-def _encode_actions_inv(actions: np.ndarray, *, adapt_to_pi: bool = False) -> np.ndarray:
+def _encode_actions_inv(
+    actions: np.ndarray, *, adapt_to_pi: bool = False, gripper_type: GripperType = "trossen"
+) -> np.ndarray:
     if adapt_to_pi:
         actions = _joint_flip_mask() * actions
-        actions[:, [6, 13]] = _gripper_from_angular_inv(actions[:, [6, 13]])
+        actions[:, [6, 13]] = _gripper_action_to_pi(actions[:, [6, 13]], gripper_type)
     return actions
+
+
+def _gripper_state_to_pi(value: np.ndarray, gripper_type: GripperType) -> np.ndarray:
+    """Gripper state to pi0 internal space, normalized so 0=close and 1=open."""
+    if gripper_type == "trossen":
+        return _gripper_to_angular(value)
+    if gripper_type == "sim":
+        return value
+    if gripper_type == "arx":
+        return -value / np.pi
+    raise ValueError(f"Unknown gripper_type: {gripper_type}")
+
+
+def _gripper_action_to_pi(value: np.ndarray, gripper_type: GripperType) -> np.ndarray:
+    """Gripper action command to pi0 internal space."""
+    if gripper_type == "trossen":
+        return _gripper_from_angular_inv(value)
+    if gripper_type == "sim":
+        return value
+    if gripper_type == "arx":
+        return -value / np.pi
+    raise ValueError(f"Unknown gripper_type: {gripper_type}")
+
+
+def _gripper_action_from_pi(value: np.ndarray, gripper_type: GripperType) -> np.ndarray:
+    """Gripper action from pi0 internal space back to the original robot space."""
+    if gripper_type == "trossen":
+        return _gripper_from_angular(value)
+    if gripper_type == "sim":
+        return value
+    if gripper_type == "arx":
+        return -value * np.pi
+    raise ValueError(f"Unknown gripper_type: {gripper_type}")
