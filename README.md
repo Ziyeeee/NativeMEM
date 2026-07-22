@@ -6,36 +6,25 @@
 </div>
 
 > [!WARNING]
-> This repository is a work-in-progress public code release. The code is being cleaned and validated, so APIs,
-> configuration names, preprocessing scripts, and training commands may still change.
+> This repository is a work-in-progress public code release. The code is being cleaned and validated, so APIs, configuration names, preprocessing scripts, and training commands may still change.
 
-NativeMEM equips a pretrained vision-language-action (VLA) policy with long-term, real-time-updated visual memory.
-Its Native Memory Compression scheme repurposes the VLA's own vision encoder to compress each historical frame-view
-observation into a single native memory token, then appends those tokens to the VLA's original input sequence.
+NativeMEM equips a pretrained vision-language-action (VLA) policy with long-term, real-time-updated visual memory. Its Native Memory Compression scheme repurposes the VLA's own vision encoder to compress each historical frame-view observation into a single native memory token, then appends those tokens to the VLA's original input sequence.
 
-This repository retains the upstream `openpi` Python package namespace for compatibility with the underlying model,
-training, and policy infrastructure.
+This repository retains the upstream `openpi` Python package namespace for compatibility with the underlying model, training, and policy infrastructure.
 
 ## Method overview
 
 NativeMEM training has three main steps:
 
-1. **Native Memory Compression:** initialize the memory tokenizer from the VLA's native vision encoder, freeze the
-   pretrained VLA, and train only the memory branch with the VLA's original action-prediction objective. Each
-   frame-view pair is summarized into one action-aligned memory token.
-2. **Memory caching:** run the learned memory tokenizer over target-task demonstrations and store the per-frame,
-   per-view `mem_token` features in a LeRobot dataset.
-3. **Task-specific finetuning:** retrieve the cached memory tokens, append them to the standard observation and prompt
-   tokens, and finetune the VLA backbone, action head, memory projection, and memory beginning-of-sequence token. The
-   memory-tokenizer encoder remains fixed.
+1. **Native Memory Compression:** initialize the memory tokenizer from the VLA's native vision encoder, freeze the pretrained VLA, and train only the memory branch with the VLA's original action-prediction objective. Each frame-view pair is summarized into one action-aligned memory token.
+2. **Memory caching:** run the learned memory tokenizer over target-task demonstrations and store the per-frame, per-view `mem_token` features in a LeRobot dataset.
+3. **Task-specific finetuning:** retrieve the cached memory tokens, append them to the standard observation and prompt tokens, and finetune the VLA backbone, action head, memory projection, and memory beginning-of-sequence token. The memory-tokenizer encoder remains fixed.
 
-The cached LeRobot feature is named `mem_token`. The Stage 2 data pipeline collects selected frame-view tokens into
-`Observation.memory` and produces the corresponding `Observation.memory_mask`.
+The cached LeRobot feature is named `mem_token`. The Stage 2 data pipeline collects selected frame-view tokens into `Observation.memory` and produces the corresponding `Observation.memory_mask`.
 
 ## Setup
 
-NativeMEM requires Python 3.11 and a CUDA-capable NVIDIA GPU for practical training. Install the environment with
-[`uv`](https://docs.astral.sh/uv/):
+NativeMEM requires Python 3.11 and a CUDA-capable NVIDIA GPU for practical training. Install the environment with [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
 GIT_LFS_SKIP_SMUDGE=1 uv sync
@@ -66,9 +55,7 @@ python scripts/prepare_mem_tokenizer_h5.py \
     --dataset_type sim
 ```
 
-Supported dataset types are `sim`, `trossen`, and `arx`. Each output episode contains three camera streams, state,
-action, instructions, and a `dataset_type` attribute. When instruction JSON files are unavailable, provide fallback
-text with `--instruction_map`, repeated `--default_instruction TASK=TEXT`, or `--fallback_instruction`.
+Supported dataset types are `sim`, `trossen`, and `arx`. Each output episode contains three camera streams, state, action, instructions, and a `dataset_type` attribute. When instruction JSON files are unavailable, provide fallback text with `--instruction_map`, repeated `--default_instruction TASK=TEXT`, or `--fallback_instruction`.
 
 For a large task collection, `--dataset_manifest` accepts a text file containing one raw data directory per line.
 
@@ -83,13 +70,11 @@ python scripts/merge_mem_tokenizer_h5.py \
     --output_path /path/to/train.h5
 ```
 
-Pass `--dataset_type` once for each input. It may be omitted when the type can be inferred from a filename such as
-`sim_all.h5` or from the episode attributes.
+Pass `--dataset_type` once for each input. It may be omitted when the type can be inferred from a filename such as `sim_all.h5` or from the episode attributes.
 
 ### 3. Compute normalization assets
 
-Compute normalization statistics for every dataset type used in Stage 1. Store each result under
-`assets/<dataset_type>` so the loader can select the correct statistics per episode.
+Compute normalization statistics for every dataset type used in Stage 1. Store each result under `assets/<dataset_type>` so the loader can select the correct statistics per episode.
 
 ```bash
 python scripts/compute_norm_stats_h5.py \
@@ -112,8 +97,7 @@ python scripts/train_mem_tokenizer.py mem_tokenizer_pretrain \
 
 ## Stage 1.5: Extract memory tokens
 
-Convert each task HDF5 file to a LeRobot dataset and extract one `mem_token` per frame-view pair with the trained
-memory tokenizer:
+Convert each task HDF5 file to a LeRobot dataset and extract one `mem_token` per frame-view pair with the trained memory tokenizer:
 
 ```bash
 python examples/robotwin/convert_h5_to_lerobot_mem_tokenizer.py \
@@ -123,13 +107,11 @@ python examples/robotwin/convert_h5_to_lerobot_mem_tokenizer.py \
     --instruction "task description"
 ```
 
-The converter uses episode-level `instructions` when present; `--instruction` is the fallback. The resulting LeRobot
-dataset is stored under `$HF_LEROBOT_HOME/<repo_id>`.
+The converter uses episode-level `instructions` when present; `--instruction` is the fallback. The resulting LeRobot dataset is stored under `$HF_LEROBOT_HOME/<repo_id>`.
 
 ## Stage 2: Train NativeMEM
 
-Before training, update the `NativeMEMWeightLoader` path in
-[`src/openpi/training/config_nativemem.py`](src/openpi/training/config_nativemem.py) to the Stage 1 `params` directory:
+Before training, update the `NativeMEMWeightLoader` path in [`src/openpi/training/config_nativemem.py`](src/openpi/training/config_nativemem.py) to the Stage 1 `params` directory:
 
 ```python
 weight_loader=weight_loaders.NativeMEMWeightLoader(
@@ -137,12 +119,9 @@ weight_loader=weight_loaders.NativeMEMWeightLoader(
 )
 ```
 
-The provided `nativemem_pi05` config targets simulated ALOHA data: it uses `gripper_type="sim"` and loads normalization
-statistics from `assets/sim`. When training another robot type, update both the gripper type and normalization asset ID
-in the same config.
+The provided `nativemem_pi05` config targets simulated ALOHA data: it uses `gripper_type="sim"` and loads normalization statistics from `assets/sim`. When training another robot type, update both the gripper type and normalization asset ID in the same config.
 
-The same config maps `repo_id` prefixes to the maximum flattened memory length. Add a task prefix to
-`REPO_ID_MEMORY_MAX_LEN` when the dataset needs a value other than the model default. The first matching prefix wins.
+The same config maps `repo_id` prefixes to the maximum flattened memory length. Add a task prefix to `REPO_ID_MEMORY_MAX_LEN` when the dataset needs a value other than the model default. The first matching prefix wins.
 
 Then launch Stage 2:
 
@@ -172,9 +151,7 @@ src/openpi/training/config_nativemem.py                     # Stage 2 configurat
 
 ## Acknowledgements
 
-NativeMEM builds on the public [OpenPI](https://github.com/Physical-Intelligence/openpi) codebase and pi0.5
-infrastructure. We thank the OpenPI authors and the broader open-source robotics community for making this work
-possible.
+NativeMEM builds on the public [OpenPI](https://github.com/Physical-Intelligence/openpi) codebase and pi0.5 infrastructure. We thank the OpenPI authors and the broader open-source robotics community for making this work possible.
 
 ## License
 

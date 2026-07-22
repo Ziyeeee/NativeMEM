@@ -72,8 +72,16 @@ def save_state(
         # Save the normalization stats.
         data_config = data_loader.data_config()
         norm_stats = data_config.norm_stats
-        if norm_stats is not None and data_config.asset_id is not None:
-            _normalize.save(directory / data_config.asset_id, norm_stats)
+        if norm_stats is None or data_config.asset_id is None:
+            return
+        base = directory / data_config.asset_id
+        # MemTokenizer uses one set of normalization stats per robot type.
+        first_value = next(iter(norm_stats.values()), None)
+        if isinstance(first_value, dict):
+            for dataset_type, stats in norm_stats.items():
+                _normalize.save(base / dataset_type, stats)
+        else:
+            _normalize.save(base, norm_stats)
 
     # Split params that can be used for inference into a separate item.
     with at.disable_typechecking():
