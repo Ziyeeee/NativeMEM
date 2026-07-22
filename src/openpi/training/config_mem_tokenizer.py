@@ -92,8 +92,8 @@ _CONFIGS = [
             history_seq_len=_model_default.history_seq_len,
             stride_range=(8, 16),
         ),
-        batch_size=1,
-        num_workers=2,
+        batch_size=16,
+        num_workers=4,
         num_train_steps=50_000,
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,

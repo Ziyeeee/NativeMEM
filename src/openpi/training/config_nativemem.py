@@ -212,12 +212,12 @@ class TrainConfig:
     assets_base_dir: str = "./assets"
     checkpoint_base_dir: str = "./checkpoints"
     seed: int = 42
-    batch_size: int = 16
+    batch_size: int = 32
     num_workers: int = 8
     num_train_steps: int = 50_000
     log_interval: int = 100
-    save_interval: int = 1000
-    keep_period: int | None = 50_000
+    save_interval: int = 10_000
+    keep_period: int | None = 20_000
     overwrite: bool = False
     resume: bool = False
     wandb_enabled: bool = True
@@ -251,33 +251,22 @@ _CONFIGS = [
         model=_BASE_MODEL,
         data=LeRobotAlohaMemDataConfig(
             assets=AssetsConfig(
-                assets_dir="gs://openpi-assets/checkpoints/pi05_base/assets",
-                asset_id="trossen",
+                assets_dir="./assets",
+                asset_id="sim",
+            ),
+            gripper_type="sim",
+            base_config=DataConfig(
+                prompt_from_task=True,
             ),
         ),
-        weight_loader=weight_loaders.NativeMEMWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        # weight_loader=weight_loaders.NativeMEMWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.NativeMEMWeightLoader("checkpoints/mem_tokenizer_pretrain/all_v3/49999/ema_params"),
+        num_train_steps = 20_000,
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,
-            peak_lr=5e-5,
-            decay_steps=50_000,
-            decay_lr=5e-6,
-        ),
-    ),
-    TrainConfig(
-        name="nativemem_pi05_rtc",
-        model=dataclasses.replace(_BASE_MODEL, rtc=True, max_delay=8),
-        data=LeRobotAlohaMemDataConfig(
-            assets=AssetsConfig(
-                assets_dir="gs://openpi-assets/checkpoints/pi05_base/assets",
-                asset_id="trossen",
-            ),
-        ),
-        weight_loader=weight_loaders.NativeMEMWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=1_000,
-            peak_lr=5e-5,
-            decay_steps=50_000,
-            decay_lr=5e-6,
+            peak_lr=2e-5,
+            decay_steps=20_000,
+            decay_lr=1e-6,
         ),
     ),
 ]
