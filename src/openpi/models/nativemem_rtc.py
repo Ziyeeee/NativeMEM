@@ -107,7 +107,7 @@ class NativeMEMRTC(_model.BaseModel):
         img.lazy_init(next(iter(config.fake_obs().images.values())), train=False, rngs=rngs)
         self.PaliGemma = nnx.Dict(llm=llm, img=img)
 
-        # MLP to project cls_token (SigLIP dim) -> paligemma_width
+        # Project cached memory tokens from the SigLIP width to the PaliGemma width.
         mem_dim = _siglip.decode_variant(config.siglip_variant)["width"]
         self.memory_proj_in = nnx.Linear(mem_dim, paligemma_config.width, rngs=rngs)
         self.mem_bos = nnx.Param(jax.random.normal(rngs.params(), (1, 1, paligemma_config.width)) * 0.02)
@@ -154,7 +154,7 @@ class NativeMEMRTC(_model.BaseModel):
         mem_offset = sum(t.shape[1] for t in tokens)
         n_aux = 0
 
-        # Project and concatenate memory cls_tokens
+        # Project and concatenate native memory tokens.
         if obs.memory is not None:
             memory_tokens = self.memory_proj_in(obs.memory)  # (B, T*N, paligemma_width)
             mem_bos = jnp.broadcast_to(self.mem_bos.value, (memory_tokens.shape[0], 1, memory_tokens.shape[-1]))

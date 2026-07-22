@@ -92,7 +92,7 @@ def _require_checkpoint_prefixes(loaded_params, prefixes: tuple[str, ...]) -> No
         )
 
 
-class _MemTokenizerClsExtractor(nnx.Module):
+class _MemTokenExtractor(nnx.Module):
     """Minimal module matching the mem_tokenizer encoder subtree."""
 
     def __init__(self, config: MemTokenizerConfig, rngs: nnx.Rngs):
@@ -114,22 +114,22 @@ class _MemTokenizerClsExtractor(nnx.Module):
 
 
 @nnx.jit
-def _extract_cls_tokens(model: _MemTokenizerClsExtractor, images: dict[str, jnp.ndarray]) -> jnp.ndarray:
-    """Run the mem_tokenizer student encoder, returning [B, 3, D]."""
-    cls_per_view = []
+def _extract_mem_tokens(model: _MemTokenExtractor, images: dict[str, jnp.ndarray]) -> jnp.ndarray:
+    """Return one memory token per frame-view pair with shape [B, 3, D]."""
+    mem_tokens_per_view = []
     for key in _model.IMAGE_KEYS:
-        cls, _, _ = model.encoder(images[key], train=False, extract_block=None, ids_keep=None)
-        cls_per_view.append(cls)
-    return jax.lax.stop_gradient(jnp.concatenate(cls_per_view, axis=1))
+        mem_token, _, _ = model.encoder(images[key], train=False, extract_block=None, ids_keep=None)
+        mem_tokens_per_view.append(mem_token)
+    return jax.lax.stop_gradient(jnp.concatenate(mem_tokens_per_view, axis=1))
 
 
-class MemTokenizerClsTokenizer:
-    """Tokenizer that extracts per-view cls tokens from a pretrained mem_tokenizer model."""
+class MemTokenExtractor:
+    """Extract per-view memory tokens from a pretrained memory tokenizer."""
 
     def __init__(self, params_path: str, model_config: MemTokenizerConfig):
         self.model_config = model_config
         self.token_dim = _siglip.decode_variant(self.model_config.siglip_variant)["width"]
-        self.model = _MemTokenizerClsExtractor(model_config, rngs=nnx.Rngs(0))
+        self.model = _MemTokenExtractor(model_config, rngs=nnx.Rngs(0))
 
         path = download.maybe_download(params_path)
         loaded_params = restore_params(path, restore_type=np.ndarray)
@@ -171,7 +171,7 @@ class MemTokenizerClsTokenizer:
         left_images: np.ndarray,
         right_images: np.ndarray,
     ) -> np.ndarray:
-        """Extract cls tokens for all decoded frames, returning [N, 3, D]."""
+        """Extract memory tokens for all decoded frames, returning [N, 3, D]."""
         images_by_key = {
             "base_0_rgb": self._prepare_images(head_images),
             "left_wrist_0_rgb": self._prepare_images(left_images),
@@ -189,10 +189,10 @@ class MemTokenizerClsTokenizer:
                     key: jnp.pad(value, ((0, BATCH_SIZE - batch_size), (0, 0), (0, 0), (0, 0)), mode="edge")
                     for key, value in batch_images.items()
                 }
-                cls_tokens = _extract_cls_tokens(self.model, batch_images)[:batch_size]
+                mem_tokens = _extract_mem_tokens(self.model, batch_images)[:batch_size]
             else:
-                cls_tokens = _extract_cls_tokens(self.model, batch_images)
-            all_tokens.append(np.array(cls_tokens))
+                mem_tokens = _extract_mem_tokens(self.model, batch_images)
+            all_tokens.append(np.array(mem_tokens))
         return np.concatenate(all_tokens, axis=0)
 
 
@@ -235,7 +235,7 @@ def create_empty_dataset(
             "shape": (len(motors),),
             "names": [motors],
         },
-        "cls_tokens": {
+        "mem_token": {
             "dtype": "float32",
             "shape": (len(img_keys), token_dim),
             "names": [img_keys],
@@ -268,7 +268,7 @@ def create_empty_dataset(
 def populate_dataset(
     dataset: LeRobotDataset,
     hdf5_file: Path,
-    tokenizer: MemTokenizerClsTokenizer,
+    tokenizer: MemTokenExtractor,
     instruction: str = "",
 ) -> LeRobotDataset:
     with h5py.File(hdf5_file, "r") as f:
@@ -302,11 +302,11 @@ def populate_dataset(
             state = f["state"][begin_idx:end_idx]
 
             num_frames = state.shape[0]
-            cls_tokens = tokenizer(head_images, left_images, right_images)
+            mem_tokens = tokenizer(head_images, left_images, right_images)
 
-            if cls_tokens.shape[0] != num_frames:
+            if mem_tokens.shape[0] != num_frames:
                 raise ValueError(
-                    f"cls token frame count mismatch: tokens={cls_tokens.shape[0]}, frames={num_frames}"
+                    f"memory token frame count mismatch: tokens={mem_tokens.shape[0]}, frames={num_frames}"
                 )
 
             for i in range(num_frames):
@@ -314,7 +314,7 @@ def populate_dataset(
                     "observation.state": state[i],
                     "action": action[i],
                     "task": instruction,
-                    "cls_tokens": cls_tokens[i],
+                    "mem_token": mem_tokens[i],
                     "observation.images.cam_high": head_images[i].transpose(2, 0, 1),
                     "observation.images.cam_right_wrist": right_images[i].transpose(2, 0, 1),
                     "observation.images.cam_left_wrist": left_images[i].transpose(2, 0, 1),
@@ -331,7 +331,7 @@ def populate_dataset(
 def port_aloha(
     data_path: Path,
     repo_id: str,
-    params_path: str = "checkpoints/mem_tokenizer_pretrain/<exp>/<step>/ema_params",
+    params_path: str = "checkpoints/mem_tokenizer_pretrain/<exp>/<step>/params",
     instruction: str = "",
     *,
     mode: Literal["video", "image"] = "image",
@@ -341,7 +341,7 @@ def port_aloha(
 ):
     init_logging()
 
-    tokenizer = MemTokenizerClsTokenizer(
+    tokenizer = MemTokenExtractor(
         params_path=params_path,
         model_config=MemTokenizerConfig(
             siglip_variant=siglip_variant,
@@ -374,6 +374,6 @@ Example usage:
 python examples/robotwin/convert_h5_to_lerobot_mem_tokenizer.py \
     --data_path /path/to/train.h5 \
     --repo_id my_task_nativemem \
-    --params_path checkpoints/mem_tokenizer_pretrain/my_encoder/49999/ema_params \
+    --params_path checkpoints/mem_tokenizer_pretrain/my_encoder/49999/params \
     --instruction "task description"
 """

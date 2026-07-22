@@ -26,6 +26,19 @@ import openpi.transforms as _transforms
 ModelType: TypeAlias = _model.ModelType
 Filter: TypeAlias = nnx.filterlib.Filter
 
+# Maps repo_id prefix to MemoryTokenizer max_len. The first matching prefix wins.
+REPO_ID_MEMORY_MAX_LEN: dict[str, int] = {
+    "click_button": 256,
+    "put_back_block": 256,
+    "observe_and_pickup": 256,
+    "swap_blocks": 256,
+    "rearrange_blocks": 256,
+    "cover_blocks": 512,
+    "arx/click_button": 256,
+    "arx/put_cube": 256,
+    "arx/scan_code": 512,
+}
+
 
 @dataclasses.dataclass(frozen=True)
 class AssetsConfig:
@@ -182,9 +195,24 @@ class LeRobotAlohaMemDataConfig(DataConfigFactory):
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
             )
 
+        resolved_max_len = self.memory_tokenizer_max_len
+        if resolved_max_len is None:
+            for prefix, max_len in REPO_ID_MEMORY_MAX_LEN.items():
+                if (self.repo_id or "").startswith(prefix):
+                    resolved_max_len = max_len
+                    logging.info("Setting memory tokenizer max_len to %d for repo_id %s.", max_len, self.repo_id)
+                    break
+        if resolved_max_len is None:
+            resolved_max_len = model_config.memory_tokenizer_max_len
+            logging.warning(
+                "repo_id %s does not match any prefix in REPO_ID_MEMORY_MAX_LEN; using the model default of %d.",
+                self.repo_id,
+                resolved_max_len,
+            )
+
         model_transforms = ModelTransformFactory(
             default_prompt=self.default_prompt,
-            memory_tokenizer_max_len=self.memory_tokenizer_max_len,
+            memory_tokenizer_max_len=resolved_max_len,
         )(model_config)
 
         return dataclasses.replace(
@@ -260,7 +288,7 @@ _CONFIGS = [
             ),
         ),
         # weight_loader=weight_loaders.NativeMEMWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        weight_loader=weight_loaders.NativeMEMWeightLoader("checkpoints/mem_tokenizer_pretrain/all_v3/49999/ema_params"),
+        weight_loader=weight_loaders.NativeMEMWeightLoader("checkpoints/mem_tokenizer_pretrain/all_v3/49999/params"),
         num_train_steps = 20_000,
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,

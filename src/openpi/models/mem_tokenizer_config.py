@@ -32,7 +32,7 @@ class MemTokenizerConfig(_model.BaseModelConfig):
 
     # Bernoulli drop probability for current-frame patch tokens during training.
     # Drop = setting input_mask=False so the patch is excluded from attention,
-    # forcing the LLM to lean on memory CLS tokens for that view's information.
+    # forcing the LLM to lean on memory tokens for that view's information.
     current_patch_drop_prob: float = 0.0
     # Cosine warmup for current_patch_drop_prob: 0 for the first
     # drop_warmup_steps, then cosine-ramp to current_patch_drop_prob over

@@ -23,7 +23,7 @@ import openpi.transforms as _transforms
 
 
 class MemLeRobotDataset(lerobot_dataset.LeRobotDataset):
-    """LeRobot dataset that adds a NativeMEM `memory` field from `cls_tokens`."""
+    """LeRobot dataset that assembles NativeMEM `memory` from cached `mem_token` features."""
 
     def __init__(
         self,
@@ -47,7 +47,7 @@ class MemLeRobotDataset(lerobot_dataset.LeRobotDataset):
 
     def _query_memory(self, indices: Sequence[int]) -> np.ndarray:
         items = self.hf_dataset.select(indices)
-        tokens = [np.asarray(items[i]["cls_tokens"], dtype=np.float32) for i in range(len(indices))]
+        tokens = [np.asarray(items[i]["mem_token"], dtype=np.float32) for i in range(len(indices))]
         return np.concatenate(tokens, axis=0)
 
     def __getitem__(self, idx) -> dict:

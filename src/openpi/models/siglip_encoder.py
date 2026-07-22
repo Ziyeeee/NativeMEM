@@ -9,7 +9,7 @@ import openpi.models.siglip as _siglip
 
 
 class SiglipEncoder(nn.Module):
-    """SigLIP ViT returning CLS and patch tokens.
+    """SigLIP ViT returning one memory summary token and the patch tokens.
 
     The module names mirror the pi0.5 SigLIP image tower so its weights can be
     remapped into this encoder during mem_tokenizer initialization.
@@ -47,8 +47,9 @@ class SiglipEncoder(nn.Module):
             batch_idx = jnp.arange(n)[:, None]
             x = x[batch_idx, ids_keep]
 
-        cls = self.param("cls", nn.initializers.zeros, (1, 1, c), x.dtype)
-        x = jnp.concatenate([jnp.tile(cls, [n, 1, 1]), x], axis=1)
+        # Keep the parameter key for compatibility with existing memory-tokenizer checkpoints.
+        mem_query = self.param("cls", nn.initializers.zeros, (1, 1, c), x.dtype)
+        x = jnp.concatenate([jnp.tile(mem_query, [n, 1, 1]), x], axis=1)
         x = x.astype(self.dtype_mm)
 
         x, encoder_out = _siglip.Encoder(
@@ -62,7 +63,7 @@ class SiglipEncoder(nn.Module):
             name="Transformer",
         )(x, deterministic=not train)
 
-        cls_token = x[:, :1]
+        mem_token = x[:, :1]
         patch_tokens = x[:, 1:]
 
         intermediate = None
@@ -70,4 +71,4 @@ class SiglipEncoder(nn.Module):
             block_key = f"block{extract_block:02d}"
             intermediate = encoder_out[block_key]["+mlp"]
 
-        return cls_token, patch_tokens, intermediate
+        return mem_token, patch_tokens, intermediate

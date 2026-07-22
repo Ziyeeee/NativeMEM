@@ -141,12 +141,12 @@ class MemTokenizerModel(_model.BaseModel):
         """Encode history+current frames with the trainable student encoder."""
         any_view = next(iter(image_seq.values()))
         B, T = any_view.shape[:2]
-        cls_per_view = []
+        mem_tokens_per_view = []
         for name in _model.IMAGE_KEYS:
             flat_images = image_seq[name].reshape(B * T, *image_seq[name].shape[2:])
-            cls, _patches, _ = self.encoder(flat_images, train=train, extract_block=None, ids_keep=None)
-            cls_per_view.append(cls.reshape(B, T, 1, self.encoder_width))
-        return jnp.concatenate(cls_per_view, axis=2)
+            mem_token, _patches, _ = self.encoder(flat_images, train=train, extract_block=None, ids_keep=None)
+            mem_tokens_per_view.append(mem_token.reshape(B, T, 1, self.encoder_width))
+        return jnp.concatenate(mem_tokens_per_view, axis=2)
 
     def _scheduled_drop_prob(self, step: jnp.ndarray | int | None) -> jnp.ndarray | float:
         """Cosine warmup: 0 for warmup_steps, then cos-ramp to v over ramp_steps."""
@@ -165,12 +165,12 @@ class MemTokenizerModel(_model.BaseModel):
         curr_frame: dict,
         tokenized_prompt: jnp.ndarray,
         tokenized_prompt_mask: jnp.ndarray,
-        stu_cls_seq: jnp.ndarray,
+        mem_token_seq: jnp.ndarray,
         *,
         train: bool,
         step: jnp.ndarray | int | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
-        B = stu_cls_seq.shape[0]
+        B = mem_token_seq.shape[0]
         tokens = []
         input_mask = []
         ar_mask = []
@@ -201,7 +201,7 @@ class MemTokenizerModel(_model.BaseModel):
             ar_mask += [False] * prompt_emb.shape[1]
 
         mem_bos = jnp.broadcast_to(self.mem_bos.value, (B, 1, self.paligemma_width))
-        mem_flat = stu_cls_seq.reshape(B, stu_cls_seq.shape[1] * self.n_views, self.encoder_width)
+        mem_flat = mem_token_seq.reshape(B, mem_token_seq.shape[1] * self.n_views, self.encoder_width)
         mem_tokens = self.memory_proj_in(mem_flat)
 
         tokens.append(mem_bos)
@@ -257,7 +257,7 @@ class MemTokenizerModel(_model.BaseModel):
         B = prefix_mask.shape[0]
         H = self.history_seq_len
         V = self.n_views
-        # prefix layout (from _embed_prefix): [img_patches | prompt | BOS | mem_cls_tokens]
+        # prefix layout (from _embed_prefix): [img_patches | prompt | BOS | mem_tokens]
         # BOS+mem always valid, count is fixed: 1 + (H+1)*V
         n_mem = 1 + (H + 1) * V
 
@@ -296,14 +296,14 @@ class MemTokenizerModel(_model.BaseModel):
 
         return jnp.concatenate([prefix_positions, suffix_positions], axis=1)
 
-    def _cls_similarity(self, stu_cls_seq: jnp.ndarray) -> jnp.ndarray:
-        batch_size = stu_cls_seq.shape[0]
+    def _mem_token_similarity(self, mem_token_seq: jnp.ndarray) -> jnp.ndarray:
+        batch_size = mem_token_seq.shape[0]
         if batch_size <= 1:
-            return jnp.array(0.0, dtype=stu_cls_seq.dtype)
+            return jnp.array(0.0, dtype=mem_token_seq.dtype)
 
-        cls_flat = stu_cls_seq.reshape(batch_size, -1)
-        norm_cls = cls_flat / (jnp.linalg.norm(cls_flat, axis=-1, keepdims=True) + 1e-8)
-        sim_matrix = norm_cls @ norm_cls.T
+        mem_token_flat = mem_token_seq.reshape(batch_size, -1)
+        normalized_mem_token = mem_token_flat / (jnp.linalg.norm(mem_token_flat, axis=-1, keepdims=True) + 1e-8)
+        sim_matrix = normalized_mem_token @ normalized_mem_token.T
         triu_idx = np.triu_indices(batch_size, k=1)
         return jnp.mean(sim_matrix[triu_idx])
 
@@ -326,7 +326,7 @@ class MemTokenizerModel(_model.BaseModel):
             name: observation.image_seq[name][:, : self.history_seq_len + 1] for name in _model.IMAGE_KEYS
         }
         hist_cur_frames = self._preprocess_image_seq(seq_rng, hist_cur_frames, train=train)
-        stu_hist_cur_cls = self._encode_hist_cur(hist_cur_frames, train=train)
+        mem_token_seq = self._encode_hist_cur(hist_cur_frames, train=train)
 
         batch_shape = actions.shape[:-2]
         noise = jax.random.normal(noise_rng, actions.shape)
@@ -341,7 +341,7 @@ class MemTokenizerModel(_model.BaseModel):
             curr_frame,
             observation.tokenized_prompt,
             observation.tokenized_prompt_mask,
-            stu_hist_cur_cls,
+            mem_token_seq,
             train=train,
             step=step,
         )
@@ -360,11 +360,11 @@ class MemTokenizerModel(_model.BaseModel):
         )
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
         action_loss = jnp.mean(jnp.square(v_t - u_t), axis=[1, 2])
-        cls_sim = self._cls_similarity(stu_hist_cur_cls)
+        mem_token_sim = self._mem_token_similarity(mem_token_seq)
 
         metrics = {
             "action_loss": jnp.mean(action_loss),
-            "cls_sim": cls_sim,
+            "mem_token_sim": mem_token_sim,
             "current_patch_drop_prob": jnp.asarray(
                 self._scheduled_drop_prob(step) if train else 0.0, dtype=jnp.float32
             ),
