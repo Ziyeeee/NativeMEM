@@ -288,7 +288,7 @@ _CONFIGS = [
             ),
         ),
         # weight_loader=weight_loaders.NativeMEMWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        weight_loader=weight_loaders.NativeMEMWeightLoader("checkpoints/mem_tokenizer_pretrain/all_v3/49999/params"),
+        weight_loader=weight_loaders.NativeMEMWeightLoader("checkpoints/mem_tokenizer_pretrain/pretrain/49999/params"),
         num_train_steps = 20_000,
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,
