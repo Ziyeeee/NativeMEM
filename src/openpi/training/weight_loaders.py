@@ -126,9 +126,7 @@ class MemTokenizerWeightLoader(WeightLoader):
             if key.startswith("PaliGemma/img/"):
                 remapped[_remap_siglip_encoder_key(key, "encoder")] = value
                 remapped[key] = value
-            elif key.startswith("PaliGemma/llm/"):
-                remapped[key] = value
-            elif key.startswith(suffix_mlp_prefixes):
+            elif key.startswith(("PaliGemma/llm/", *suffix_mlp_prefixes)):
                 remapped[key] = value
 
         remapped_params = flax.traverse_util.unflatten_dict(remapped, sep="/")
@@ -156,6 +154,19 @@ def _merge_params(loaded_params: at.Params, params: at.Params, *, missing_regex:
     for k, v in flat_loaded.items():
         if k in flat_ref:
             result[k] = v.astype(flat_ref[k].dtype) if v.dtype != flat_ref[k].dtype else v
+        elif k.endswith("/value") and k[:-6] in flat_ref:
+            # NNX checkpoints store Param leaves under ``value``, while
+            # ``State.to_pure_dict()`` exposes the same leaves without it.
+            ref_k = k[:-6]
+            result[ref_k] = v.astype(flat_ref[ref_k].dtype) if v.dtype != flat_ref[ref_k].dtype else v
+
+    load_num = len(result)
+    if load_num == 0:
+        raise ValueError(
+            "No checkpoint weights matched the model parameter tree. "
+            "Check that the checkpoint and model configurations are compatible."
+        )
+    logging.info("Loaded %d/%d weights from the checkpoint.", load_num, len(flat_ref))
 
     flat_loaded.clear()
 
@@ -164,5 +175,7 @@ def _merge_params(loaded_params: at.Params, params: at.Params, *, missing_regex:
     for k in {k for k in flat_ref if pattern.fullmatch(k)}:
         if k not in result:
             result[k] = flat_ref[k]
+
+    logging.info("Merged %d/%d missing weights.", len(result) - load_num, len(flat_ref) - load_num)
 
     return flax.traverse_util.unflatten_dict(result, sep="/")

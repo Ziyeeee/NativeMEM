@@ -35,6 +35,28 @@ import openpi.transforms as _transforms
 # ---------------------------------------------------------------------------
 
 DATASET_TYPES: tuple[str, ...] = ("trossen", "sim", "arx")
+_GRIPPER_INDICES = np.asarray([6, 13])
+
+
+def _validate_norm_stats(
+    dataset_type: str,
+    norm_stats: dict[str, _transforms.NormStats],
+) -> None:
+    """Reject stats computed in raw robot gripper space instead of pi0 space."""
+    for feature in ("state", "actions"):
+        stats = norm_stats.get(feature)
+        if stats is None or stats.q01 is None or stats.q99 is None:
+            continue
+        if stats.q01.shape[-1] <= int(_GRIPPER_INDICES[-1]):
+            continue
+        q01 = np.asarray(stats.q01)[_GRIPPER_INDICES]
+        q99 = np.asarray(stats.q99)[_GRIPPER_INDICES]
+        if np.any(q01 < -0.05) or np.any(q99 > 1.2):
+            raise ValueError(
+                f"{dataset_type!r} {feature} norm stats contain gripper quantiles outside pi0 space: "
+                f"q01={q01}, q99={q99}. Regenerate them with "
+                f"`python scripts/compute_norm_stats_h5.py ... --gripper-type {dataset_type}`."
+            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -154,7 +176,9 @@ class DataConfigFactory(abc.ABC):
         out: dict[str, dict[str, _transforms.NormStats]] = {}
         for dataset_type in DATASET_TYPES:
             try:
-                out[dataset_type] = _normalize.load(base / dataset_type)
+                stats = _normalize.load(base / dataset_type)
+                _validate_norm_stats(dataset_type, stats)
+                out[dataset_type] = stats
             except FileNotFoundError:
                 logging.info("Norm stats not found in %s/%s", self.norm_stats_assets_dir, dataset_type)
         return out or None

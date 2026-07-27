@@ -79,11 +79,13 @@ Compute normalization statistics for every dataset type used in Stage 1. Store e
 ```bash
 python scripts/compute_norm_stats_h5.py \
     --h5-path /path/to/sim_all.h5 \
-    --output-dir assets/sim
+    --output-dir assets/sim \
+    --gripper-type sim
 
 python scripts/compute_norm_stats_h5.py \
     --h5-path /path/to/arx_all.h5 \
-    --output-dir assets/arx
+    --output-dir assets/arx \
+    --gripper-type arx
 ```
 
 ## Stage 1: Train the memory tokenizer

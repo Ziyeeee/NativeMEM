@@ -5,13 +5,14 @@ groups, each containing `state` and `action` datasets) and writes a
 `norm_stats.json` to the chosen output directory.
 
 Applies the same per-sample transforms used at training time in
-`data_loader_tsiglip.py` before accumulating stats:
+`data_loader_mem_tokenizer.py` before accumulating stats:
     AlohaInputs(adapt_to_pi=True) -> DeltaActions(make_bool_mask(6, -1, 6, -1))
 
 Example:
     python scripts/compute_norm_stats_h5.py \
         --h5-path data/sim_all.h5 \
-        --output-dir assets/sim
+        --output-dir assets/sim \
+        --gripper-type sim
 """
 
 import pathlib
@@ -25,6 +26,8 @@ import openpi.policies.aloha_policy as aloha_policy
 import openpi.shared.normalize as normalize
 import openpi.transforms as _transforms
 
+DATASET_TYPES = ("trossen", "sim", "arx")
+
 
 def iter_episode_keys(f: h5py.File) -> list[str]:
     keys = [k for k in f.keys() if k.startswith("episode_0")]
@@ -32,12 +35,16 @@ def iter_episode_keys(f: h5py.File) -> list[str]:
     return keys
 
 
-def main(h5_path: str, output_dir: str, action_horizon: int = 50) -> None:
+def main(
+    h5_path: str,
+    output_dir: str,
+    gripper_type: aloha_policy.GripperType | None = None,
+    action_horizon: int = 50,
+) -> None:
     h5_path = pathlib.Path(h5_path)
     if not h5_path.exists():
         raise FileNotFoundError(f"H5 file not found: {h5_path}")
 
-    aloha_inputs = aloha_policy.AlohaInputs(adapt_to_pi=True, gripper_type='arx')
     delta_actions = _transforms.DeltaActions(_transforms.make_bool_mask(6, -1, 6, -1))
 
     # AlohaInputs requires an "images" dict containing at least cam_high; supply
@@ -48,6 +55,7 @@ def main(h5_path: str, output_dir: str, action_horizon: int = 50) -> None:
 
     with h5py.File(h5_path, "r") as f:
         episode_keys = iter_episode_keys(f)
+        aloha_inputs = aloha_policy.AlohaInputs(adapt_to_pi=True, gripper_type=gripper_type)
         for ep_key in tqdm.tqdm(episode_keys, desc="Computing stats"):
             group = f[ep_key]
             state_arr = np.asarray(group["state"][()], dtype=np.float32)
