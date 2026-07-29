@@ -2,7 +2,7 @@
 AGENTS.md
 
 # Data directories.
-assets/
+# assets/
 checkpoints/
 data/
 wandb/
