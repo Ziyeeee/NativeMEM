@@ -20,8 +20,8 @@ Running this conversion script will take approximately 30 minutes.
 
 import shutil
 
-from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import tensorflow_datasets as tfds
 import tyro
 
@@ -85,8 +85,8 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                         "wrist_image": step["observation"]["wrist_image"],
                         "state": step["observation"]["state"],
                         "actions": step["action"],
-                        "task": step["language_instruction"].decode(),
-                    }
+                    },
+                    task=step["language_instruction"].decode(),
                 )
             dataset.save_episode()
 

@@ -31,9 +31,10 @@ You will need 1.8TB of disk storage to download the DROID RLDS dataset.
 
 First, change the `rlds_data_dir` path in your `TrainConfig` to the directory that you downloaded the `droid` dataset into (see [src/openpi/training/config.py](src/openpi/training/config.py)).
 
-Then, compute normalization statistics (this will take ~10 minutes):
+Then, compute normalization statistics. This walks the whole dataset, so for DROID-scale data point
+`rlds_data_dir` at a subset if you want it to finish quickly:
 ```bash
-uv run --group rlds scripts/compute_norm_stats.py --config-name pi05_full_droid_finetune --max-frames 10_000_000
+uv run --group rlds scripts/compute_norm_stats.py pi05_full_droid_finetune
 ```
 
 Run training:

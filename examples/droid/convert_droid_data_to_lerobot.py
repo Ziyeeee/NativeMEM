@@ -19,8 +19,8 @@ import shutil
 
 import cv2
 import h5py
-from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
@@ -142,8 +142,8 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                     "actions": np.concatenate(
                         [step["action"]["joint_velocity"], step["action"]["gripper_position"][None]], dtype=np.float32
                     ),
-                    "task": language_instruction,
-                }
+                },
+                task=language_instruction,
             )
         dataset.save_episode()
 
